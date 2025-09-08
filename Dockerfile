@@ -29,4 +29,5 @@ RUN git clone https://github.com/barneyhill/RiNALMo
 ENV PYTHONUNBUFFERED=1
 ENV TORCH_CUDA_ARCH_LIST="6.0;6.1;7.0;7.5;8.0;8.6+PTX"
 
+COPY rp_handler.py .
 CMD ["python3", "-u", "rp_handler.py"]
