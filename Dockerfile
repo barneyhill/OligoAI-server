@@ -29,8 +29,4 @@ RUN git clone https://github.com/barneyhill/RiNALMo
 ENV PYTHONUNBUFFERED=1
 ENV TORCH_CUDA_ARCH_LIST="6.0;6.1;7.0;7.5;8.0;8.6+PTX"
 
-# Expose Jupyter port
-EXPOSE 8888
-
-# Set default command (RunPod will override this)
-CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--NotebookApp.token=''", "--NotebookApp.password=''"]
+CMD ["python3", "-u", "rp_handler.py"]
