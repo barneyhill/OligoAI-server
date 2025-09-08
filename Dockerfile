@@ -23,6 +23,8 @@ RUN pip install --no-cache-dir \
 # Uninstall torchvision as specified
 RUN pip uninstall -y torchvision
 
+RUN git clone https://github.com/barneyhill/RiNALMo
+
 # Set environment variables for better performance
 ENV PYTHONUNBUFFERED=1
 ENV TORCH_CUDA_ARCH_LIST="6.0;6.1;7.0;7.5;8.0;8.6+PTX"
