@@ -12,6 +12,7 @@ RUN apt-get update && \
 
 # Install Python packages
 RUN pip install --no-cache-dir \
+    runpod \
     torch==2.1.0 \
     flash-attn==2.3.2 \
     pandas \
