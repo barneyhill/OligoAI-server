@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir \
     wandb \
     ml_collections
 
+
 # Uninstall torchvision as specified
 RUN pip uninstall -y torchvision
 
