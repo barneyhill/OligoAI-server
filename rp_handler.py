@@ -16,7 +16,7 @@ sys.path.insert(0, '/workspace/RiNALMo')
 # These imports are confirmed to work
 from rinalmo.data.alphabet import Alphabet
 from rinalmo.data.downstream.aso.dataset import ASODataset
-from rinalmo.data.downstream.aso.train_aso import ASOInhibitionPredictionWrapper
+from train_aso import ASOInhibitionPredictionWrapper
 
 # --- ADD THIS ---
 # Define the path to your model checkpoint
