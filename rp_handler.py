@@ -22,6 +22,7 @@ from train_aso import ASOInhibitionPredictionWrapper
 # Define the path to your model checkpoint
 MODEL_PATH = "/workspace/OligoAI_11_09_25.ckpt"
 
+
 def handler(job):
     """
     Tests if the model checkpoint can be loaded successfully.
