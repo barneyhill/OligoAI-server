@@ -226,8 +226,8 @@ def handler(job):
         # Validate mod lengths
         if len(sugar_mods) != aso_length:
             return {"error": f"sugar_mods length ({len(sugar_mods)}) must equal aso_length ({aso_length})"}
-        if len(backbone_mods) != aso_length - 1:
-            return {"error": f"backbone_mods length ({len(backbone_mods)}) must equal aso_length - 1 ({aso_length - 1})"}
+        if len(backbone_mods) != aso_length:
+            return {"error": f"backbone_mods length ({len(backbone_mods)}) must equal aso_length ({aso_length})"}
         
         device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {device}")
