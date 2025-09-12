@@ -1,4 +1,3 @@
-# rp_handler.py
 import os
 import sys
 import torch
@@ -19,18 +18,13 @@ try:
     print("Successfully imported from RiNALMo")
 except ImportError as e:
     print(f"Failed to import from RiNALMo: {e}")
-    print(f"Python path: {sys.path}")
-    print(f"Directory contents: {os.listdir('/workspace/RiNALMo') if os.path.exists('/workspace/RiNALMo') else 'RiNALMo not found'}")
     raise
 
-# Import the model wrapper from the root of RiNALMo
 try:
     from train_aso import ASOInhibitionPredictionWrapper
     print("Successfully imported ASOInhibitionPredictionWrapper")
 except ImportError as e:
     print(f"Failed to import ASOInhibitionPredictionWrapper: {e}")
-    print(f"Contents of /workspace/RiNALMo: {os.listdir('/workspace/RiNALMo') if os.path.exists('/workspace/RiNALMo') else 'Not found'}")
-    # We'll need to handle this in the inference function
     ASOInhibitionPredictionWrapper = None
 
 MODEL_PATH = "/workspace/OligoAI_11_09_25.ckpt"
@@ -42,80 +36,90 @@ class ASODatasetWithLen(ASODataset):
         return len(self.df)
 
 
-def run_inference_on_csv_data(csv_data, batch_size=32, device="cuda"):
+def reverse_complement(seq):
+    """Get reverse complement of RNA sequence (returns DNA complement)"""
+    complement = {'A': 'T', 'U': 'A', 'T': 'A', 'G': 'C', 'C': 'G'}
+    return ''.join(complement.get(base, base) for base in seq[::-1])
+
+
+def generate_aso_targets(target_rna, aso_length, sugar_mods, backbone_mods, dosage, transfection_method):
     """
-    Run inference on CSV data and return predictions.
+    Generate all possible ASO sequences for a target RNA.
     
-    Args:
-        csv_data: Raw CSV string data
-        batch_size: Batch size for inference
-        device: Device to run on
+    Returns a DataFrame with all possible ASO positions and their sequences.
+    """
+    rows = []
+    target_rna = target_rna.upper().replace('T', 'U')  # Ensure RNA format
+    
+    # Iterate through all possible positions
+    for i in range(len(target_rna) - aso_length + 1):
+        # Extract the target region and get reverse complement for ASO
+        target_region = target_rna[i:i + aso_length]
+        aso_seq = reverse_complement(target_region)
         
-    Returns:
-        str: CSV string with idx and oligoai_score columns
-    """
+        # Extract RNA context (±50 nucleotides from ASO binding site)
+        context_start = max(0, i - 50)
+        context_end = min(len(target_rna), i + aso_length + 50)
+        rna_context = target_rna[context_start:context_end]
+        
+        rows.append({
+            'aso_sequence_5_to_3': aso_seq,
+            'rna_context': rna_context,
+            'sugar_mods': sugar_mods,
+            'backbone_mods': backbone_mods,
+            'dosage': dosage,
+            'transfection_method': transfection_method,
+            'custom_id': f'pos_{i}',  # Position in target RNA
+            'position': i  # Store position for reference
+        })
     
-    # Parse the CSV data
-    df = pd.read_csv(io.StringIO(csv_data))
+    return pd.DataFrame(rows)
+
+
+def run_inference_on_generated_data(df, batch_size=32, device="cuda"):
+    """Run inference on generated ASO DataFrame"""
     
-    # Store original indices
+    # Store original indices and positions
     df['original_idx'] = df.index
+    original_positions = df['position'].values
     
-    # Add dummy columns that ASODataset expects but aren't needed for inference
-    # These are only added internally - users don't need to provide them
-    if 'split' not in df.columns:
-        df['split'] = 'test'  # Dummy value required by ASODataset
+    # Add dummy columns for ASODataset
+    df['split'] = 'test'
+    df['inhibition_percent'] = 0.0
     
-    if 'inhibition_percent' not in df.columns:
-        df['inhibition_percent'] = 0.0  # Dummy value required by ASODataset
-    
-    # Load the model
+    # Load model
     print(f"Loading model from: {MODEL_PATH}")
-    
     if not os.path.exists(MODEL_PATH):
         raise FileNotFoundError(f"Model checkpoint not found at {MODEL_PATH}")
     
     if ASOInhibitionPredictionWrapper is None:
-        # Fallback: try to load with pytorch lightning directly
         import lightning as pl
         try:
             model = pl.LightningModule.load_from_checkpoint(MODEL_PATH)
-            print("Loaded model using Lightning fallback")
         except Exception as e:
-            print(f"Failed to load model with Lightning: {e}")
-            # Last resort: load state dict directly
-            checkpoint = torch.load(MODEL_PATH, map_location=device)
-            print(f"Checkpoint keys: {checkpoint.keys()}")
             raise RuntimeError("Cannot load model without ASOInhibitionPredictionWrapper class")
     else:
         model = ASOInhibitionPredictionWrapper.load_from_checkpoint(MODEL_PATH)
-        print(f"Model loaded successfully")
     
     model.eval()
     model.to(device)
     
-    if hasattr(model, 'scaler'):
-        print(f"Model has scaler: {type(model.scaler)}")
-    
     # Initialize alphabet
     alphabet = Alphabet()
     
-    # Create a temporary file for the dataset (ASODataset needs a file path)
+    # Create temporary file for dataset
     with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as tmp_file:
         temp_path = tmp_file.name
         df.to_csv(tmp_file, index=False)
     
     try:
-        # Create dataset
+        # Create dataset and dataloader
         dataset = ASODatasetWithLen(
             data_path=temp_path,
             alphabet=alphabet,
             pad_to_max_len=True,
         )
         
-        print(f"Loaded dataset with {len(dataset)} samples")
-        
-        # Create dataloader
         dataloader = DataLoader(
             dataset,
             batch_size=batch_size,
@@ -129,10 +133,9 @@ def run_inference_on_csv_data(csv_data, batch_size=32, device="cuda"):
         
         with torch.no_grad():
             for batch_idx, batch in enumerate(dataloader):
-                # Unpack batch - ASODataset returns 8 items
                 aso_tokens, chem_tokens, backbone_tokens, context_tokens, _, dosage, transfection_method_tokens, _ = batch
                 
-                # Move tensors to device
+                # Move to device
                 aso_tokens = aso_tokens.to(device)
                 chem_tokens = chem_tokens.to(device)
                 backbone_tokens = backbone_tokens.to(device)
@@ -140,7 +143,7 @@ def run_inference_on_csv_data(csv_data, batch_size=32, device="cuda"):
                 dosage = dosage.to(device)
                 transfection_method_tokens = transfection_method_tokens.to(device)
                 
-                # Forward pass with mixed precision if on GPU
+                # Forward pass
                 if device == "cuda":
                     with torch.autocast(device_type='cuda', dtype=torch.float16):
                         scaled_predictions = model(
@@ -153,7 +156,7 @@ def run_inference_on_csv_data(csv_data, batch_size=32, device="cuda"):
                         context_tokens, dosage, transfection_method_tokens
                     )
                 
-                # Inverse transform the predictions to get real values
+                # Inverse transform predictions
                 if hasattr(model, 'scaler') and model.scaler is not None:
                     unscaled_predictions = model.scaler.inverse_transform(scaled_predictions)
                 else:
@@ -165,102 +168,119 @@ def run_inference_on_csv_data(csv_data, batch_size=32, device="cuda"):
                     print(f"Processed {(batch_idx + 1) * batch_size} samples...")
         
     finally:
-        # Clean up temp file
         if os.path.exists(temp_path):
             os.unlink(temp_path)
     
-    print(f"Inference completed. Generated {len(all_predictions)} predictions")
-    
-    # Create output dataframe with idx and oligoai_score
-    output_df = pd.DataFrame({
-        'idx': df['original_idx'].values,
-        'oligoai_score': all_predictions
-    })
-    
-    # Convert to CSV string
-    csv_buffer = io.StringIO()
-    output_df.to_csv(csv_buffer, index=False)
-    return csv_buffer.getvalue()
+    return all_predictions, original_positions
 
 
 def handler(job):
     """
-    RunPod handler that processes raw CSV data through the OligoAI model.
+    RunPod handler that generates and scores all possible ASO sequences for a target RNA.
     
     Expected input:
     {
-        "csv_data": "aso_sequence_5_to_3,rna_context,sugar_mods,...\\n...",  # Raw CSV string
-        "batch_size": 32  # Optional, default 32
+        "target_rna": "AUGCUGAUC...",  # Full RNA sequence
+        "aso_length": 20,  # Length of ASO to generate
+        "sugar_mods": "['MOE', 'MOE', 'DNA', ...]",  # Must match aso_length
+        "backbone_mods": "['PS', 'PO', 'PS', ...]",  # Must match aso_length - 1
+        "dosage": 1.0,
+        "transfection_method": "gymnotic",
+        "batch_size": 32  # Optional
     }
-    
-    Required CSV columns:
-    - aso_sequence_5_to_3
-    - rna_context
-    - sugar_mods (list format like "['MOE', 'MOE', 'DNA', ...]")
-    - backbone_mods (list format like "['PS', 'PO', 'PS', ...]")
-    - dosage
-    - transfection_method
-    - custom_id
     
     Returns:
     {
-        "csv_output": "idx,oligoai_score\\n0,85.3\\n1,72.1\\n..."
+        "csv_output": "position,aso_sequence,oligoai_score\\n0,ACGTACGT...,85.3\\n..."
     }
     """
     
     try:
         job_input = job.get('input', {})
         
-        # Get CSV data
-        csv_data = job_input.get('csv_data')
-        if not csv_data:
-            return {"error": "No csv_data provided in input"}
-        
+        # Get inputs
+        target_rna = job_input.get('target_rna')
+        aso_length = job_input.get('aso_length')
+        sugar_mods = job_input.get('sugar_mods')
+        backbone_mods = job_input.get('backbone_mods')
+        dosage = job_input.get('dosage')
+        transfection_method = job_input.get('transfection_method')
         batch_size = job_input.get('batch_size', 32)
         
-        # Set device
+        # Validate inputs
+        if not target_rna:
+            return {"error": "No target_rna provided"}
+        if not aso_length:
+            return {"error": "No aso_length provided"}
+        if len(target_rna) < aso_length + 100:
+            return {"error": f"target_rna length ({len(target_rna)}) must be >= aso_length + 100 ({aso_length + 100}) to allow full context"}
+        
+        # Parse mods if they're strings
+        if isinstance(sugar_mods, str):
+            import ast
+            sugar_mods = ast.literal_eval(sugar_mods)
+        if isinstance(backbone_mods, str):
+            import ast
+            backbone_mods = ast.literal_eval(backbone_mods)
+        
+        # Validate mod lengths
+        if len(sugar_mods) != aso_length:
+            return {"error": f"sugar_mods length ({len(sugar_mods)}) must equal aso_length ({aso_length})"}
+        if len(backbone_mods) != aso_length - 1:
+            return {"error": f"backbone_mods length ({len(backbone_mods)}) must equal aso_length - 1 ({aso_length - 1})"}
+        
         device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {device}")
         
-        # Validate CSV format
-        try:
-            # Quick validation that it's valid CSV
-            test_df = pd.read_csv(io.StringIO(csv_data))
-            num_rows = len(test_df)
-            print(f"Received CSV with {num_rows} rows and columns: {list(test_df.columns)}")
-            
-            # Check for required columns
-            required_cols = ['aso_sequence_5_to_3', 'rna_context', 'sugar_mods', 'backbone_mods', 
-                           'dosage', 'transfection_method', 'custom_id']
-            missing_cols = [col for col in required_cols if col not in test_df.columns]
-            if missing_cols:
-                return {"error": f"Missing required columns: {missing_cols}"}
-                
-        except Exception as e:
-            return {"error": f"Invalid CSV format: {str(e)}"}
+        # Generate all ASO sequences
+        print(f"Generating ASO sequences for RNA of length {len(target_rna)} with ASO length {aso_length}")
+        df = generate_aso_targets(
+            target_rna=target_rna,
+            aso_length=aso_length,
+            sugar_mods=str(sugar_mods),  # Convert back to string for DataFrame
+            backbone_mods=str(backbone_mods),
+            dosage=dosage,
+            transfection_method=transfection_method
+        )
+        print(f"Generated {len(df)} ASO sequences")
         
         # Run inference
         print("Starting inference...")
-        csv_output = run_inference_on_csv_data(
-            csv_data=csv_data, 
-            batch_size=batch_size, 
+        predictions, positions = run_inference_on_generated_data(
+            df=df,
+            batch_size=batch_size,
             device=device
         )
         
-        # Return the CSV output directly
+        # Create output DataFrame
+        output_df = pd.DataFrame({
+            'position': positions,
+            'aso_sequence': df['aso_sequence_5_to_3'].values,
+            'oligoai_score': predictions
+        })
+        
+        # Sort by score (highest first)
+        output_df = output_df.sort_values('oligoai_score', ascending=False)
+        
+        # Convert to CSV
+        csv_buffer = io.StringIO()
+        output_df.to_csv(csv_buffer, index=False)
+        
         return {
-            "csv_output": csv_output
+            "csv_output": csv_buffer.getvalue(),
+            "total_sequences": len(output_df),
+            "best_position": int(output_df.iloc[0]['position']),
+            "best_score": float(output_df.iloc[0]['oligoai_score'])
         }
         
     except Exception as e:
         error_trace = traceback.format_exc()
         print(f"Error in handler: {error_trace}")
         return {
-            "error": f"Failed to process CSV: {str(e)}",
+            "error": f"Failed to process: {str(e)}",
             "traceback": error_trace
         }
 
 
 if __name__ == "__main__":
-    # RunPod serverless mode
     runpod.serverless.start({"handler": handler})
