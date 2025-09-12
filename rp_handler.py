@@ -1,6 +1,21 @@
 # rp_handler.py
 import os
+import sys
+import torch
+import pandas as pd
+import numpy as np
+from torch.utils.data import DataLoader
 import runpod
+import traceback
+import io
+import tempfile
+
+# Add RiNALMo to path
+sys.path.insert(0, '/workspace/RiNALMo')
+
+from rinalmo.data.alphabet import Alphabet
+from rinalmo.data.downstream.aso.dataset import ASODataset
+from rinalmo.data.downstream.aso.train_aso import ASOInhibitionPredictionWrapper
 
 # The path where the network volume is mounted
 VOLUME_PATH = "/workspace"
