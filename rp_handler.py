@@ -252,9 +252,10 @@ def handler(job):
             device=device
         )
         
+        # Convert numpy values to regular Python types for JSON serialization
         return {
-            "positions": positions.tolist(),  # [0, 1, 2, ...]
-            "scores": predictions     # [85.3, 84.1, 83.7, ...]
+            "positions": positions.tolist() if hasattr(positions, 'tolist') else list(positions),
+            "scores": [float(score) for score in predictions]  # Convert numpy float32 to Python float
         }
         
     except Exception as e:
