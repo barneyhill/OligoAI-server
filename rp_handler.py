@@ -252,25 +252,9 @@ def handler(job):
             device=device
         )
         
-        # Create output DataFrame
-        output_df = pd.DataFrame({
-            'position': positions,
-            'aso_sequence': df['aso_sequence_5_to_3'].values,
-            'oligoai_score': predictions
-        })
-        
-        # Sort by score (highest first)
-        output_df = output_df.sort_values('oligoai_score', ascending=False)
-        
-        # Convert to CSV
-        csv_buffer = io.StringIO()
-        output_df.to_csv(csv_buffer, index=False)
-        
         return {
-            "csv_output": csv_buffer.getvalue(),
-            "total_sequences": len(output_df),
-            "best_position": int(output_df.iloc[0]['position']),
-            "best_score": float(output_df.iloc[0]['oligoai_score'])
+            "positions": positions.tolist(),  # [0, 1, 2, ...]
+            "scores": predictions.tolist()     # [85.3, 84.1, 83.7, ...]
         }
         
     except Exception as e:
