@@ -253,8 +253,8 @@ def handler(job):
         )
         
         return {
-            "positions": positions,  # [0, 1, 2, ...]
-            "scores": predictions     # [85.3, 84.1, 83.7, ...]
+            "positions": positions.tolist(),  # [0, 1, 2, ...]
+            "scores": predictions.tolist()     # [85.3, 84.1, 83.7, ...]
         }
         
     except Exception as e:
